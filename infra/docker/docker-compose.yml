@@ -1,0 +1,49 @@
+services:
+  auralog:
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile
+    container_name: auralog
+    ports:
+      - "4000:4000"
+      - "9000:9000/udp"
+    environment:
+      AURALOG_DUCKDB_PATH: /data/auralog.duckdb
+      AURALOG_INGEST_JWT_SECRET: "dev-jwt-secret-change-me"
+      PHX_SERVER: "true"
+      SECRET_KEY_BASE: "auralog-prod-secret-key-base-0123456789abcdef0123456789abcdef0123456789abcdef"
+      PORT: "4000"
+    volumes:
+      - auralog_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4000/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 15s
+    restart: unless-stopped
+
+  seed_ingest:
+    image: python:3.12-alpine
+    container_name: auralog-seed-ingest
+    working_dir: /seed
+    command: ["python", "/seed/demo_ingest.py"]
+    environment:
+      AURALOG_INGEST_HTTP_URL: http://auralog:4000/api/ingest
+      AURALOG_INGEST_UDP_HOST: auralog
+      AURALOG_INGEST_UDP_PORT: "9000"
+      AURALOG_INGEST_JWT_SECRET: "dev-jwt-secret-change-me"
+      AURALOG_INGEST_JWT_SUBJECT: "demo-seeder"
+      AURALOG_INGEST_JWT_TENANT: "demo"
+      AURALOG_SEED_BURST_SIZE: "2000"
+      AURALOG_SEED_RATE: "250"
+    volumes:
+      - ./demo_ingest.py:/seed/demo_ingest.py:ro
+    depends_on:
+      auralog:
+        condition: service_healthy
+    restart: unless-stopped
+    profiles: ["demo"]
+
+volumes:
+  auralog_data:

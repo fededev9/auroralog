@@ -1,0 +1,9 @@
+_build
+deps
+.git
+native/aura_log_nif/target
+native/auralog_core/target
+*.duckdb
+erl_crash.dump
+tmp_phx_style
+tmp_phx_style_17

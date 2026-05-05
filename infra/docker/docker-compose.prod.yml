@@ -1,0 +1,27 @@
+services:
+  auralog:
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile
+    container_name: auralog
+    ports:
+      - "4000:4000"
+      - "9000:9000/udp"
+    environment:
+      AURALOG_DUCKDB_PATH: /data/auralog.duckdb
+      AURALOG_INGEST_JWT_SECRET: ${AURALOG_INGEST_JWT_SECRET}
+      PHX_SERVER: "true"
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE}
+      PORT: "4000"
+    volumes:
+      - auralog_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4000/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 30
+      start_period: 20s
+    restart: unless-stopped
+
+volumes:
+  auralog_data:

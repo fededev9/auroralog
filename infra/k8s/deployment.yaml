@@ -1,0 +1,56 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: auralog
+  namespace: auralog
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: auralog
+  template:
+    metadata:
+      labels:
+        app: auralog
+    spec:
+      containers:
+        - name: auralog
+          image: ghcr.io/your-org/auralog:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 4000
+              name: http
+            - containerPort: 9000
+              name: udp-ingest
+              protocol: UDP
+          envFrom:
+            - configMapRef:
+                name: auralog-config
+            - secretRef:
+                name: auralog-secrets
+          volumeMounts:
+            - name: auralog-data
+              mountPath: /data
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+      volumes:
+        - name: auralog-data
+          persistentVolumeClaim:
+            claimName: auralog-data
