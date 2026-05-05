@@ -21,5 +21,19 @@ config :aura_log_web, AuraLogWeb.Endpoint,
 
 config :logger, :console, format: "[$level] $message\n"
 
+udp_ingest_enabled? =
+  case System.get_env("AURALOG_UDP_INGEST_ENABLED", "true")
+       |> String.trim()
+       |> String.downcase() do
+    "0" -> false
+    "false" -> false
+    "no" -> false
+    _ -> true
+  end
+
+config :aura_log, :start_udp_listener, udp_ingest_enabled?
+
+config :phoenix_live_view, :colocated_js, disable_symlink_warning: true
+
 config :phoenix, :stacktrace_depth, 20
 config :phoenix, :plug_init_mode, :runtime

@@ -51,7 +51,8 @@ Checks performed:
 - Ingest API requires JWT (HS256)
 - Tenant is derived from JWT claim `tenant`
 - Basic fixed-window rate limit per tenant/token/ip
-- Ingest payload size limit is enforced at parser layer
+- Ingest payload size limit is enforced by `Plug.Parsers` (HTTP ingest scope and Phoenix endpoint)
+- UDP ingest is disabled by default in production (`AURALOG_UDP_INGEST_ENABLED`); enable only on trusted networks
 
 ## Known operational limits
 

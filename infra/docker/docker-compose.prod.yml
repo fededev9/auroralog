@@ -10,6 +10,8 @@ services:
     environment:
       AURALOG_DUCKDB_PATH: /data/auralog.duckdb
       AURALOG_INGEST_JWT_SECRET: ${AURALOG_INGEST_JWT_SECRET}
+      # UDP ingest is off by default in production releases; set to true only behind a trusted network.
+      AURALOG_UDP_INGEST_ENABLED: ${AURALOG_UDP_INGEST_ENABLED:-false}
       PHX_SERVER: "true"
       SECRET_KEY_BASE: ${SECRET_KEY_BASE}
       PORT: "4000"

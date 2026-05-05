@@ -39,8 +39,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 COPY --from=builder /app/_build/prod/rel/auralog /app/auralog
 
+# Secrets (SECRET_KEY_BASE, AURALOG_INGEST_JWT_SECRET) must be supplied at runtime
+# via compose, Kubernetes, or your orchestrator — do not bake them into the image.
 ENV PHX_SERVER=true \
-    SECRET_KEY_BASE=auralog-prod-secret-key-base-0123456789abcdef0123456789abcdef0123456789abcdef \
     PORT=4000 \
     AURALOG_DUCKDB_PATH=/data/auralog.duckdb
 

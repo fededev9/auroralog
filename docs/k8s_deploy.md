@@ -19,6 +19,7 @@ kubectl apply -f infra/k8s/networkpolicy.yaml
 - Replace image `ghcr.io/your-org/auralog:latest`
 - Create real secret from `infra/k8s/secret.example.yaml`
 - Size PVC according to retention and ingest load
+- Review `AURALOG_UDP_INGEST_ENABLED` in `infra/k8s/configmap.yaml` (defaults to off; enable only on trusted networks)
 
 ## Health probes
 

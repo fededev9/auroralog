@@ -8,6 +8,18 @@ if config_env() == :prod do
       Generate one and set it before starting the release.
       """
 
+  udp_ingest? =
+    case System.get_env("AURALOG_UDP_INGEST_ENABLED", "false")
+         |> String.trim()
+         |> String.downcase() do
+      "1" -> true
+      "true" -> true
+      "yes" -> true
+      _ -> false
+    end
+
+  config :aura_log, :start_udp_listener, udp_ingest?
+
   config :aura_log_web, AuraLogWeb.Endpoint,
     server: true,
     secret_key_base:

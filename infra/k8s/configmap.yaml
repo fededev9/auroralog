@@ -7,3 +7,4 @@ data:
   PORT: "4000"
   PHX_SERVER: "true"
   AURALOG_DUCKDB_PATH: "/data/auralog.duckdb"
+  AURALOG_UDP_INGEST_ENABLED: "false"

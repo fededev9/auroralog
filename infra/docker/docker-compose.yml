@@ -10,6 +10,8 @@ services:
     environment:
       AURALOG_DUCKDB_PATH: /data/auralog.duckdb
       AURALOG_INGEST_JWT_SECRET: "dev-jwt-secret-change-me"
+      # Demo stack uses a production release image; enable UDP explicitly for local seed traffic.
+      AURALOG_UDP_INGEST_ENABLED: "true"
       PHX_SERVER: "true"
       SECRET_KEY_BASE: "auralog-prod-secret-key-base-0123456789abcdef0123456789abcdef0123456789abcdef"
       PORT: "4000"

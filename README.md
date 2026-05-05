@@ -30,10 +30,14 @@ The `seed_ingest` service runs only in `demo` profile and generates fake logs.
 
 ## Production startup (no mock data)
 
-Required secrets:
+Required secrets (set at container runtime; the Docker image does not embed them):
 
 - `SECRET_KEY_BASE`
 - `AURALOG_INGEST_JWT_SECRET`
+
+Optional:
+
+- `AURALOG_UDP_INGEST_ENABLED` (defaults to `false` in the production compose file; keep off unless you trust the network)
 
 Run:
 
@@ -91,6 +95,12 @@ Example payload:
 ```
 
 The server always derives tenant from JWT claims (not from request body).
+
+## UDP ingest (optional)
+
+UDP listens on port `9000` for fire-and-forget payloads. In **production releases** it is **off by default**; set `AURALOG_UDP_INGEST_ENABLED=true` only when the pod or host is on a trusted network (UDP has no JWT).
+
+In local `mix phx.server`, UDP defaults to **on** unless you export `AURALOG_UDP_INGEST_ENABLED=false`.
 
 ## Operations
 
