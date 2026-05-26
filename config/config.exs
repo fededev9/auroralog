@@ -10,7 +10,6 @@ config :aura_log,
   ingest_jwt_secret: System.get_env("AURALOG_INGEST_JWT_SECRET", "dev-jwt-secret-change-me")
 
 config :aura_log, AuraLog.Storage.DuckDBWriter,
-  database_path: System.get_env("AURALOG_DUCKDB_PATH", "/var/lib/auralog/auralog.duckdb"),
   flush_interval_ms: 2_000,
   max_batch_size: 1_000
 

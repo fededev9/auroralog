@@ -25,7 +25,7 @@ RUN mix deps.get
 # Copy the rest of the source and build once.
 COPY . .
 # duckdb_ex.install starts the app; use dev env so prod runtime.exs secrets are not required at build time.
-RUN MIX_ENV=dev mix duckdb_ex.install
+RUN MIX_ENV=dev AURALOG_DUCKDB_PATH=/app/priv/data/auralog.duckdb mix duckdb_ex.install
 RUN cd apps/aura_log_web && mix assets.deploy && cd /app && mix compile && mix release auralog
 
 FROM debian:trixie-slim AS app_runtime

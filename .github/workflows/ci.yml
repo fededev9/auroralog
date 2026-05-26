@@ -18,6 +18,8 @@ jobs:
       - name: Fetch deps
         run: mix deps.get
       - name: Install DuckDB CLI
+        env:
+          AURALOG_DUCKDB_PATH: ${{ runner.temp }}/auralog.duckdb
         run: |
           mix duckdb_ex.install
           chmod +x priv/duckdb/duckdb

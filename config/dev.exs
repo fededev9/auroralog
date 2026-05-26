@@ -33,6 +33,11 @@ udp_ingest_enabled? =
 
 config :aura_log, :start_udp_listener, udp_ingest_enabled?
 
+config :aura_log, AuraLog.Storage.DuckDBWriter,
+  database_path:
+    System.get_env("AURALOG_DUCKDB_PATH") ||
+      Path.expand("../priv/data/auralog.duckdb", __DIR__)
+
 config :phoenix_live_view, :colocated_js, disable_symlink_warning: true
 
 config :phoenix, :stacktrace_depth, 20
