@@ -153,21 +153,18 @@ defmodule AuraLog.Storage.DuckDBWriter do
   defp persist_batch(conn, rows) do
     normalized = Enum.map(rows, &normalize_row/1)
 
-    :ok = DuckDB.execute(conn, "BEGIN TRANSACTION", [])
-
-    case insert_logs_and_terms(conn, normalized) do
-      :ok ->
-        upsert_rollup_buckets(conn, normalized)
-        DuckDB.execute(conn, "COMMIT", [])
-
+    with :ok <- insert_logs_and_terms(conn, normalized),
+         :ok <- upsert_rollup_buckets(conn, normalized) do
+      :ok
+    else
       {:error, reason} ->
-        Logger.error("Batch persist failed, rolling back: #{inspect(reason)}")
-        DuckDB.execute(conn, "ROLLBACK", [])
+        Logger.error("Batch persist failed: #{inspect(reason)}")
+        {:error, reason}
     end
   rescue
     error ->
       Logger.error("Batch persist exception: #{inspect(error)}")
-      DuckDB.execute(conn, "ROLLBACK", [])
+      {:error, error}
   end
 
   defp insert_logs_and_terms(conn, normalized_rows) do
@@ -226,8 +223,11 @@ defmodule AuraLog.Storage.DuckDBWriter do
 
       Map.update(acc, key, 1, &(&1 + 1))
     end)
-    |> Enum.each(fn {{bucket, tenant, service, family}, count} ->
-      DuckDB.execute(conn, @upsert_rollup_sql, [bucket, tenant, service, family, count])
+    |> Enum.reduce_while(:ok, fn {{bucket, tenant, service, family}, count}, :ok ->
+      case DuckDB.execute(conn, @upsert_rollup_sql, [bucket, tenant, service, family, count]) do
+        :ok -> {:cont, :ok}
+        {:error, reason} -> {:halt, {:error, reason}}
+      end
     end)
   end
 
@@ -305,26 +305,52 @@ defmodule AuraLog.Storage.DuckDBWriter do
       ts: Map.get(row, :ts) || Map.get(row, "ts") || DateTime.utc_now() |> DateTime.to_iso8601(),
       tenant: Map.get(row, :tenant) || Map.get(row, "tenant") || "default",
       source: Map.get(row, :source) || Map.get(row, "source") || "unknown",
-      host: Map.get(row, :host) || Map.get(row, "host"),
-      service: Map.get(row, :service) || Map.get(row, "service"),
-      level: Map.get(row, :level) || Map.get(row, "level"),
+      host: string_field(row, :host, "host"),
+      service: string_field(row, :service, "service"),
+      level: string_field(row, :level, "level"),
       status_code: parse_integer(Map.get(row, :status_code) || Map.get(row, "status_code")),
-      method: Map.get(row, :method) || Map.get(row, "method"),
-      path: Map.get(row, :path) || Map.get(row, "path"),
+      method: string_field(row, :method, "method"),
+      path: string_field(row, :path, "path"),
       latency_ms: parse_float(Map.get(row, :latency_ms) || Map.get(row, "latency_ms")),
-      message: Map.get(row, :message) || Map.get(row, "message"),
-      raw: Map.get(row, :raw) || Map.get(row, "raw") || Map.get(row, :raw_line) || "",
+      message: string_field(row, :message, "message"),
+      raw:
+        string_field(row, :raw, "raw") || string_field(row, :raw_line, "raw_line") || "",
       attrs_json: encode_json(attrs_map),
       parse_ok: parse_ok?(row),
-      parse_error: Map.get(row, :parse_error) || Map.get(row, "parse_error"),
-      detected_format: Map.get(row, :detected_format) || Map.get(row, "detected_format"),
-      schema_version: Map.get(row, :schema_version) || Map.get(row, "schema_version"),
+      parse_error: string_field(row, :parse_error, "parse_error"),
+      detected_format: string_field(row, :detected_format, "detected_format"),
+      schema_version: string_field(row, :schema_version, "schema_version"),
       inference_confidence:
         parse_float(Map.get(row, :inference_confidence) || Map.get(row, "inference_confidence")),
       inferred_fields_json:
-        Map.get(row, :inferred_fields_json) || Map.get(row, "inferred_fields_json") || "{}"
+        encode_json(
+          Map.get(row, :inferred_fields_json) || Map.get(row, "inferred_fields_json") || %{}
+        )
     }
   end
+
+  defp string_field(row, atom_key, string_key) do
+    row
+    |> Map.get(atom_key)
+    |> case do
+      nil -> Map.get(row, string_key)
+      value -> value
+    end
+    |> coerce_string()
+  end
+
+  defp coerce_string(nil), do: nil
+  defp coerce_string(value) when is_binary(value), do: value
+
+  defp coerce_string(value) when is_list(value) do
+    if Enum.all?(value, &is_integer/1) and List.ascii_printable?(value) do
+      List.to_string(value)
+    else
+      nil
+    end
+  end
+
+  defp coerce_string(value), do: to_string(value)
 
   defp parse_ok?(row) do
     parse_error = Map.get(row, :parse_error) || Map.get(row, "parse_error")
