@@ -34,7 +34,7 @@ jobs:
         env:
           SECRET_KEY_BASE: ci-secret-key-base-0123456789abcdef0123456789abcdef0123456789abcdef
           AURALOG_INGEST_JWT_SECRET: ci-jwt-secret-change-me
-        run: docker compose -f infra/docker/docker-compose.prod.yml up -d
+        run: docker compose -f infra/docker/docker-compose.prod.yml up -d --wait
       - name: Smoke post-deploy
         env:
           AURALOG_INGEST_JWT_SECRET: ci-jwt-secret-change-me
@@ -43,6 +43,9 @@ jobs:
         run: |
           chmod +x infra/docker/smoke_post_deploy.sh
           ./infra/docker/smoke_post_deploy.sh
+      - name: Container logs on failure
+        if: failure()
+        run: docker compose -f infra/docker/docker-compose.prod.yml logs --no-color
       - name: Trivy scan image
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:

@@ -24,7 +24,8 @@ RUN mix deps.get
 
 # Copy the rest of the source and build once.
 COPY . .
-RUN mix deps.get && cd apps/aura_log_web && mix assets.deploy && cd /app && mix compile && mix release auralog
+RUN mix deps.get && mix duckdb_ex.install
+RUN cd apps/aura_log_web && mix assets.deploy && cd /app && mix compile && mix release auralog
 
 FROM debian:trixie-slim AS app_runtime
 
@@ -38,6 +39,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 COPY --from=builder /app/_build/prod/rel/auralog /app/auralog
+
+# duckdb_ex runs the DuckDB CLI (erlexec); expose it on PATH for the release.
+RUN DDB="$(find /app/auralog -type f -path '*/priv/duckdb/duckdb' 2>/dev/null | head -n1)" && \
+    if [ -n "${DDB}" ]; then ln -sf "${DDB}" /usr/local/bin/duckdb; fi
 
 # Secrets (SECRET_KEY_BASE, AURALOG_INGEST_JWT_SECRET) must be supplied at runtime
 # via compose, Kubernetes, or your orchestrator — do not bake them into the image.

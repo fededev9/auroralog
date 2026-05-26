@@ -5,11 +5,28 @@ BASE_URL="${BASE_URL:-http://localhost:4000}"
 JWT_SECRET="${AURALOG_INGEST_JWT_SECRET:-}"
 JWT_SUBJECT="${JWT_SUBJECT:-smoke-runner}"
 JWT_TENANT="${JWT_TENANT:-smoke}"
+WAIT_ATTEMPTS="${SMOKE_WAIT_ATTEMPTS:-60}"
+WAIT_SECONDS="${SMOKE_WAIT_SECONDS:-2}"
 
 if [[ -z "${JWT_SECRET}" ]]; then
   echo "AURALOG_INGEST_JWT_SECRET is required"
   exit 1
 fi
+
+wait_for_health() {
+  local attempt=1
+
+  until curl -fsS "${BASE_URL}/health" >/dev/null 2>&1; do
+    if [[ "${attempt}" -ge "${WAIT_ATTEMPTS}" ]]; then
+      echo "Health check failed after ${WAIT_ATTEMPTS} attempts (${BASE_URL}/health)"
+      return 1
+    fi
+
+    echo "Waiting for ${BASE_URL}/health (${attempt}/${WAIT_ATTEMPTS})..."
+    sleep "${WAIT_SECONDS}"
+    attempt=$((attempt + 1))
+  done
+}
 
 token="$(
 python - <<'PY'
@@ -28,7 +45,10 @@ PY
 )"
 
 echo "Checking health endpoint..."
-curl -fsS "${BASE_URL}/health" >/dev/null
+if ! wait_for_health; then
+  echo "Hint: docker compose -f infra/docker/docker-compose.prod.yml logs"
+  exit 56
+fi
 
 echo "Posting ingest event with JWT..."
 curl -fsS -X POST "${BASE_URL}/api/ingest" \
