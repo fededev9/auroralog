@@ -6,7 +6,8 @@ services:
     container_name: auralog
     ports:
       - "4000:4000"
-      - "9000:9000/udp"
+      # UDP 9000 is intentionally not published by default. Enable AURALOG_UDP_INGEST_ENABLED
+      # and map 9000:9000/udp only on trusted networks, with AURALOG_UDP_INGEST_TOKEN set.
     environment:
       AURALOG_DUCKDB_PATH: /data/auralog.duckdb
       AURALOG_INGEST_JWT_SECRET: ${AURALOG_INGEST_JWT_SECRET}

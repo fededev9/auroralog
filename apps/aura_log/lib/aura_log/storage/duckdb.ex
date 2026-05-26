@@ -12,8 +12,14 @@ defmodule AuraLog.Storage.DuckDB do
   @doc """
   Opens a connection to the configured DuckDB database.
   """
-  @spec connect(String.t()) :: {:ok, conn()} | {:error, term()}
-  def connect(database_path) do
+  @spec connect(String.t() | :memory) :: {:ok, conn()} | {:error, term()}
+  def connect(:memory), do: DuckdbEx.Connection.connect(:memory)
+
+  def connect(database_path) when database_path in [":memory:", ":memory"] do
+    DuckdbEx.Connection.connect(:memory)
+  end
+
+  def connect(database_path) when is_binary(database_path) do
     DuckdbEx.Connection.connect(database_path)
   rescue
     error -> {:error, error}

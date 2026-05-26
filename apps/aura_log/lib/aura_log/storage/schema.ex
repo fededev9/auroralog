@@ -44,30 +44,32 @@ defmodule AuraLog.Storage.Schema do
     tenant VARCHAR,
     service VARCHAR,
     status_family VARCHAR,
-    events BIGINT
+    events BIGINT,
+    PRIMARY KEY (bucket_start, tenant, service, status_family)
   );
   """
 
-  @dashboard_query """
-  SELECT
-    date_trunc('minute', ts) AS bucket_start,
-    service,
-    count(*) AS events,
-    count_if(status_code BETWEEN 400 AND 499) AS errors_4xx,
-    count_if(status_code >= 500) AS errors_5xx
-  FROM logs
-  WHERE ts >= now() - INTERVAL 15 MINUTE
-  GROUP BY 1, 2
-  ORDER BY bucket_start DESC;
+  @throughput_rollup_query """
+  SELECT coalesce(sum(events), 0)::BIGINT AS total
+  FROM logs_1m
+  WHERE bucket_start >= now() - (? * INTERVAL 1 SECOND);
   """
 
-  @throughput_query """
+  @throughput_logs_query """
   SELECT count(*)::BIGINT AS total
   FROM logs
   WHERE ts >= now() - (? * INTERVAL 1 SECOND);
   """
 
-  @error_rate_query """
+  @error_rate_rollup_query """
+  SELECT
+    coalesce(sum(events) FILTER (WHERE status_family = '4xx'), 0)::BIGINT AS status_4xx,
+    coalesce(sum(events) FILTER (WHERE status_family = '5xx'), 0)::BIGINT AS status_5xx
+  FROM logs_1m
+  WHERE bucket_start >= now() - (? * INTERVAL 1 SECOND);
+  """
+
+  @error_rate_logs_query """
   SELECT
     count(*) FILTER (WHERE status_code BETWEEN 400 AND 499)::BIGINT AS status_4xx,
     count(*) FILTER (WHERE status_code >= 500)::BIGINT AS status_5xx
@@ -75,29 +77,65 @@ defmodule AuraLog.Storage.Schema do
   WHERE ts >= now() - (? * INTERVAL 1 SECOND);
   """
 
-  @search_query """
-  SELECT service, message, raw, status_code, ts
-  FROM logs
-  WHERE lower(raw) LIKE lower(?)
-     OR lower(message) LIKE lower(?)
-     OR lower(service) LIKE lower(?)
-  ORDER BY ts DESC
+  @rollup_has_data_query """
+  SELECT count(*)::BIGINT AS cnt FROM logs_1m LIMIT 1;
+  """
+
+  @search_term_query """
+  SELECT l.service, l.message, l.raw, l.status_code, l.ts
+  FROM logs l
+  WHERE l.id IN (
+    SELECT log_id
+    FROM log_terms
+    WHERE term = ?
+    GROUP BY log_id
+  )
+  ORDER BY l.ts DESC
+  LIMIT ?;
+  """
+
+  @search_multi_term_query """
+  SELECT l.service, l.message, l.raw, l.status_code, l.ts
+  FROM logs l
+  WHERE l.id IN (
+    SELECT log_id
+    FROM log_terms
+    WHERE term IN ({PLACEHOLDERS})
+    GROUP BY log_id
+    HAVING count(DISTINCT term) = {TERM_COUNT}
+  )
+  ORDER BY l.ts DESC
   LIMIT ?;
   """
 
   @log_indexes [
     "CREATE INDEX IF NOT EXISTS logs_ts_idx ON logs(ts);",
     "CREATE INDEX IF NOT EXISTS logs_tenant_idx ON logs(tenant);",
-    "CREATE INDEX IF NOT EXISTS logs_status_idx ON logs(status_code);"
+    "CREATE INDEX IF NOT EXISTS logs_status_idx ON logs(status_code);",
+    "CREATE INDEX IF NOT EXISTS log_terms_term_idx ON log_terms(term);",
+    "CREATE INDEX IF NOT EXISTS log_terms_log_id_idx ON log_terms(log_id);"
   ]
 
   def logs_table_sql, do: @logs_table
   def log_terms_sql, do: @log_terms_table
   def logs_rollup_sql, do: @logs_rollup_table
-  def dashboard_query_sql, do: @dashboard_query
-  def throughput_query_sql, do: @throughput_query
-  def error_rate_query_sql, do: @error_rate_query
-  def search_query_sql, do: @search_query
+  def throughput_rollup_query_sql, do: @throughput_rollup_query
+  def throughput_logs_query_sql, do: @throughput_logs_query
+  def error_rate_rollup_query_sql, do: @error_rate_rollup_query
+  def error_rate_logs_query_sql, do: @error_rate_logs_query
+  def rollup_has_data_query_sql, do: @rollup_has_data_query
+  def search_term_query_sql, do: @search_term_query
+
+  @doc """
+  Builds a parameterized multi-term search SQL string and placeholder list.
+  """
+  def search_multi_term_sql(term_count) do
+    placeholders = Enum.map_join(1..term_count, ", ", fn _ -> "?" end)
+
+    @search_multi_term_query
+    |> String.replace("{PLACEHOLDERS}", placeholders)
+    |> String.replace("{TERM_COUNT}", Integer.to_string(term_count))
+  end
 
   def bootstrap_sql do
     [@logs_table, @log_terms_table, @logs_rollup_table] ++ @log_indexes

@@ -34,7 +34,10 @@ echo "Posting ingest event with JWT..."
 curl -fsS -X POST "${BASE_URL}/api/ingest" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer ${token}" \
-  -d "{\"raw\":\"service=smoke status_code=200 message=post_deploy_smoke\"}" >/dev/null
+  -d "{\"raw\":\"{\\\"service\\\":\\\"smoke\\\",\\\"message\\\":\\\"post_deploy_smoke\\\",\\\"status_code\\\":200}\"}" >/dev/null
+
+echo "Waiting for DuckDB flush..."
+sleep 3
 
 echo "Checking dashboard reachable..."
 curl -fsS "${BASE_URL}/dashboard?q=post_deploy_smoke" >/dev/null

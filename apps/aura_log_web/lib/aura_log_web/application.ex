@@ -4,6 +4,8 @@ defmodule AuraLogWeb.Application do
 
   @impl true
   def start(_type, _args) do
+    {:ok, _} = Application.ensure_all_started(:aura_log)
+
     children = [
       AuraLogWeb.Endpoint
     ]

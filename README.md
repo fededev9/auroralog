@@ -1,6 +1,8 @@
 # AuraLog
 
-AuraLog is a self-hosted, open-source real-time log analytics platform built with Elixir/Phoenix, LiveView, Rust (Rustler), and DuckDB.
+[![CI](https://github.com/fededev9/auroralog/actions/workflows/ci.yml/badge.svg)](https://github.com/fededev9/auroralog/actions/workflows/ci.yml)
+
+AuraLog is a self-hosted, open-source (Apache-2.0) real-time log analytics platform built with Elixir/Phoenix, LiveView, Rust (Rustler), and DuckDB.
 
 ## Stack
 
@@ -23,70 +25,47 @@ AuraLog is a self-hosted, open-source real-time log analytics platform built wit
 docker compose -f infra/docker/docker-compose.yml --profile demo up --build
 ```
 
-HTTP ingest endpoint: `http://localhost:4000/api/ingest`  
+HTTP ingest: `http://localhost:4000/api/ingest`  
 Dashboard: `http://localhost:4000/dashboard`
 
-The `seed_ingest` service runs only in `demo` profile and generates fake logs.
+The `seed_ingest` service runs only in the `demo` profile and generates sample logs. You should see charts within about two minutes. See [docs/time_to_first_graph.md](docs/time_to_first_graph.md).
 
-## Production startup (no mock data)
+## Production startup
 
-Required secrets (set at container runtime; the Docker image does not embed them):
+Copy [.env.example](.env.example) and set secrets at runtime (the image does not embed them):
 
-- `SECRET_KEY_BASE`
-- `AURALOG_INGEST_JWT_SECRET`
-
-Optional:
-
-- `AURALOG_UDP_INGEST_ENABLED` (defaults to `false` in the production compose file; keep off unless you trust the network)
-
-Run:
+- `SECRET_KEY_BASE` — `mix phx.gen.secret`
+- `AURALOG_INGEST_JWT_SECRET` — long random string for ingest JWT validation
 
 ```bash
 export SECRET_KEY_BASE="$(mix phx.gen.secret)"
 export AURALOG_INGEST_JWT_SECRET="replace-with-strong-secret"
 docker compose -f infra/docker/docker-compose.prod.yml up --build -d
+./infra/docker/smoke_post_deploy.sh
 ```
 
-## Local Phoenix workflow (Phoenix LiveView standard)
+UDP ingest is **disabled by default** in production. The prod compose file does not publish UDP port `9000`.
 
-From the repository root:
+## Local development
 
 ```bash
 mix deps.get
-cd apps/aura_log_web
-mix assets.setup
-mix assets.build
-cd ../..
+cd apps/aura_log_web && mix assets.setup && mix assets.build && cd ../..
 mix compile
 mix phx.server
 ```
 
-Release assets (used by Docker build):
-
-```bash
-cd apps/aura_log_web
-mix assets.deploy
-```
-
-## Quick smoke checks
-
-- Root redirect: `http://localhost:4000/` -> `/dashboard`
-- Dashboard: `http://localhost:4000/dashboard`
-- Search URL-driven: `http://localhost:4000/dashboard?q=api`
-- Styled error page example: `http://localhost:4000/dashbo`
-- Health endpoint: `http://localhost:4000/health`
-
 ## JWT ingest contract
 
-`POST /api/ingest` now requires `Authorization: Bearer <jwt>` using `HS256`.
+`POST /api/ingest` requires `Authorization: Bearer <jwt>` (HS256).
 
-Minimum claims:
+Claims:
 
 - `sub` (subject)
-- `tenant` (tenant id)
+- `tenant` (tenant id; enforced server-side, not from body)
 - `exp` (expiry)
 
-Example payload:
+Body example:
 
 ```json
 {
@@ -94,25 +73,55 @@ Example payload:
 }
 ```
 
-The server always derives tenant from JWT claims (not from request body).
+## Search and storage (v1.0)
+
+- Logs persist to DuckDB table `logs`.
+- Search uses token index table `log_terms` (Rust tokenization).
+- Dashboard throughput/errors prefer minute rollup table `logs_1m`, with fallback to raw `logs` when empty.
 
 ## UDP ingest (optional)
 
-UDP listens on port `9000` for fire-and-forget payloads. In **production releases** it is **off by default**; set `AURALOG_UDP_INGEST_ENABLED=true` only when the pod or host is on a trusted network (UDP has no JWT).
+Production: set `AURALOG_UDP_INGEST_ENABLED=true` **and** `AURALOG_UDP_INGEST_TOKEN` only on trusted networks.
 
-In local `mix phx.server`, UDP defaults to **on** unless you export `AURALOG_UDP_INGEST_ENABLED=false`.
+JSON datagram format:
+
+```json
+{"token":"<secret>","tenant":"<tenant>","raw":"<log line>"}
+```
+
+Local `mix phx.server` enables UDP by default unless `AURALOG_UDP_INGEST_ENABLED=false`.
+
+## Integrations
+
+OpenTelemetry Collector and Vector examples: [docs/integrations.md](docs/integrations.md).
 
 ## Operations
 
 - Backup: `infra/docker/backup_duckdb.sh`
 - Restore: `infra/docker/restore_duckdb.sh <file.duckdb>`
 - Retention prune: `infra/docker/prune_backups.sh`
-- Post-deploy smoke: `infra/docker/smoke_post_deploy.sh`
+- Runbook: [docs/operations_runbook.md](docs/operations_runbook.md)
 
-## Kubernetes baseline
+## Kubernetes
 
-Baseline manifests are in `infra/k8s/`:
+Baseline manifests: `infra/k8s/`.
 
-- namespace, configmap, secret example
-- pvc, deployment, service
-- hpa, pdb, network policy
+## Security
+
+See [SECURITY.md](SECURITY.md).
+
+## Not yet supported (post-v1 roadmap)
+
+- Full OpenTelemetry / OTLP native receiver
+- Metrics, traces, and APM
+- Multi-node HA and object-storage backends
+- SSO, RBAC, and multi-tenant admin UI
+- Alerting and notification channels
+
+## License
+
+Apache License 2.0 — see [LICENSE](LICENSE).
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md).

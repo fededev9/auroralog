@@ -4,12 +4,13 @@ defmodule AuraLogWeb.MixProject do
   def project do
     [
       app: :aura_log_web,
-      version: "0.1.0",
+      version: "1.0.0",
       build_path: "../../_build",
       config_path: "../../config/config.exs",
       deps_path: "../../deps",
       lockfile: "../../mix.lock",
       elixir: "~> 1.16",
+      elixirc_paths: elixirc_paths(Mix.env()),
       compilers: [:phoenix_live_view] ++ Mix.compilers(),
       start_permanent: Mix.env() == :prod,
       aliases: aliases(),
@@ -23,6 +24,9 @@ defmodule AuraLogWeb.MixProject do
       extra_applications: [:logger, :runtime_tools]
     ]
   end
+
+  defp elixirc_paths(:test), do: ["lib", "test/support"]
+  defp elixirc_paths(_), do: ["lib"]
 
   defp deps do
     [

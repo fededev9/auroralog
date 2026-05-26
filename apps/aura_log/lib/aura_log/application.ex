@@ -10,7 +10,6 @@ defmodule AuraLog.Application do
         {Phoenix.PubSub, name: AuraLog.PubSub},
         {Task.Supervisor, name: AuraLog.Parser.TaskSupervisor},
         AuraLog.Metrics.RuntimeCounters,
-        AuraLog.Search.TokenIndex,
         AuraLog.Ingest.RateLimiter,
         AuraLog.Storage.DuckDBWriter
       ] ++ maybe_udp_listener() ++ [AuraLog.Ingest.Dispatcher]

@@ -23,3 +23,5 @@ docker compose -f infra/docker/docker-compose.yml up --build
 - DuckDB file is persisted in Docker volume (`/data/auralog.duckdb`).
 - Demo stream includes Nginx, Apache, and JSON lines.
 - Parser auto-detection works without user configuration.
+- Dashboard KPIs read from `logs_1m` rollups when data is present.
+- Search uses term index (`log_terms`); try `http://localhost:4000/dashboard?q=api` after ingest.

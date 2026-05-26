@@ -1,12 +1,36 @@
 defmodule AuraLog.Storage.DuckDBWriter do
   @moduledoc """
   Buffered batch writer for DuckDB append-only log persistence.
+
+  Owns the shared DuckDB connection used by `AuraLog.Query.Service` for reads.
   """
   use GenServer
   require Logger
 
   alias AuraLog.Metrics.RuntimeCounters
+  alias AuraLog.Search.Tokenizer
   alias AuraLog.Storage.DuckDB
+
+  @insert_log_sql """
+  INSERT INTO logs (
+    id, ts, ingested_at, tenant, source, host, service, level, status_code,
+    method, path, latency_ms, message, raw, attrs_json, parse_ok, parse_error,
+    detected_format, schema_version, inference_confidence, inferred_fields_json
+  )
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+  """
+
+  @insert_term_sql """
+  INSERT INTO log_terms (log_id, term, term_freq, ts)
+  VALUES (?, ?, ?, ?);
+  """
+
+  @upsert_rollup_sql """
+  INSERT INTO logs_1m (bucket_start, tenant, service, status_family, events)
+  VALUES (?, ?, ?, ?, ?)
+  ON CONFLICT (bucket_start, tenant, service, status_family)
+  DO UPDATE SET events = logs_1m.events + excluded.events;
+  """
 
   def start_link(_opts) do
     GenServer.start_link(__MODULE__, %{rows: [], errors: []}, name: __MODULE__)
@@ -15,12 +39,22 @@ defmodule AuraLog.Storage.DuckDBWriter do
   def enqueue(row), do: GenServer.cast(__MODULE__, {:enqueue_row, row})
   def enqueue_error(error), do: GenServer.cast(__MODULE__, {:enqueue_error, error})
 
+  @doc """
+  Runs a read query on the writer's DuckDB connection.
+  """
+  def query_rows(sql, params \\ []) do
+    GenServer.call(__MODULE__, {:query_rows, sql, params}, 60_000)
+  end
+
   @impl true
   def init(state) do
     Process.flag(:trap_exit, true)
     config = Application.get_env(:aura_log, __MODULE__, [])
     database_path = runtime_database_path(config)
-    ensure_parent_dir!(database_path)
+
+    if is_binary(database_path) and database_path not in [":memory:", ":memory"] do
+      ensure_parent_dir!(database_path)
+    end
 
     conn =
       case DuckDB.connect(database_path) do
@@ -45,6 +79,18 @@ defmodule AuraLog.Storage.DuckDBWriter do
 
     schedule_flush(config[:flush_interval_ms] || 1_000)
     {:ok, state |> Map.put(:config, config) |> Map.put(:db_conn, conn)}
+  end
+
+  @impl true
+  def handle_call({:query_rows, sql, params}, _from, %{db_conn: conn} = state) do
+    result =
+      if is_pid(conn) do
+        DuckDB.query_rows(conn, sql, params)
+      else
+        {:ok, []}
+      end
+
+    {:reply, result, state}
   end
 
   @impl true
@@ -82,20 +128,20 @@ defmodule AuraLog.Storage.DuckDBWriter do
   end
 
   defp flush_state(state) do
-    maybe_persist(state.rows, state.errors, state.db_conn, state.config)
+    maybe_persist(state.rows, state.errors, state.db_conn)
     schedule_flush(state.config[:flush_interval_ms] || 1_000)
     {:noreply, %{state | rows: [], errors: []}}
   end
 
-  defp maybe_persist([], [], _conn, _config), do: :ok
+  defp maybe_persist([], [], _conn), do: :ok
 
-  defp maybe_persist(rows, errors, conn, _config) do
+  defp maybe_persist(rows, errors, conn) do
     row_count = length(rows)
     err_count = length(errors)
     Logger.debug("Persisting #{row_count} rows and #{err_count} parse errors")
 
     if is_pid(conn) do
-      Enum.each(rows, &persist_row(conn, &1))
+      persist_batch(conn, rows)
     else
       Logger.warning("Skipping DuckDB persistence because no DB connection is available")
     end
@@ -104,50 +150,129 @@ defmodule AuraLog.Storage.DuckDBWriter do
     publish_stats(row_count, err_count)
   end
 
-  defp persist_row(conn, row) do
-    normalized = normalize_row(row)
+  defp persist_batch(conn, rows) do
+    normalized = Enum.map(rows, &normalize_row/1)
 
-    sql = """
-    INSERT INTO logs (
-      id, ts, ingested_at, tenant, source, host, service, level, status_code,
-      method, path, latency_ms, message, raw, attrs_json, parse_ok, parse_error,
-      detected_format, schema_version, inference_confidence, inferred_fields_json
-    )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
-    """
+    :ok = DuckDB.execute(conn, "BEGIN TRANSACTION", [])
 
-    params = [
-      normalized.id,
-      normalized.ts,
-      DateTime.utc_now() |> DateTime.to_iso8601(),
-      normalized.tenant,
-      normalized.source,
-      normalized.host,
-      normalized.service,
-      normalized.level,
-      normalized.status_code,
-      normalized.method,
-      normalized.path,
-      normalized.latency_ms,
-      normalized.message,
-      normalized.raw,
-      normalized.attrs_json,
-      normalized.parse_ok,
-      normalized.parse_error,
-      normalized.detected_format,
-      normalized.schema_version,
-      normalized.inference_confidence,
-      normalized.inferred_fields_json
-    ]
-
-    case DuckDB.execute(conn, sql, params) do
+    case insert_logs_and_terms(conn, normalized) do
       :ok ->
-        :ok
+        upsert_rollup_buckets(conn, normalized)
+        DuckDB.execute(conn, "COMMIT", [])
 
       {:error, reason} ->
-        Logger.error("DuckDB insert failed: #{inspect(reason)} row=#{inspect(row)}")
+        Logger.error("Batch persist failed, rolling back: #{inspect(reason)}")
+        DuckDB.execute(conn, "ROLLBACK", [])
+    end
+  rescue
+    error ->
+      Logger.error("Batch persist exception: #{inspect(error)}")
+      DuckDB.execute(conn, "ROLLBACK", [])
+  end
+
+  defp insert_logs_and_terms(conn, normalized_rows) do
+    Enum.reduce_while(normalized_rows, :ok, fn row, :ok ->
+      case insert_log_row(conn, row) do
+        :ok -> insert_term_rows(conn, row)
+        {:error, reason} -> {:halt, {:error, reason}}
+      end
+    end)
+  end
+
+  defp insert_log_row(conn, row) do
+    params = log_insert_params(row, DateTime.utc_now() |> DateTime.to_iso8601())
+
+    case DuckDB.execute(conn, @insert_log_sql, params) do
+      :ok -> :ok
+      {:error, reason} -> {:error, reason}
     end
   end
+
+  defp insert_term_rows(conn, row) do
+    terms = terms_for_row(row)
+
+    Enum.reduce_while(terms, :ok, fn term, :ok ->
+      freq = term_frequency(term, row)
+      params = [row.id, term, freq, row.ts]
+
+      case DuckDB.execute(conn, @insert_term_sql, params) do
+        :ok -> {:cont, :ok}
+        {:error, reason} -> {:halt, {:error, reason}}
+      end
+    end)
+  end
+
+  defp terms_for_row(row) do
+    [row.message, row.raw, row.service]
+    |> Enum.filter(&is_binary/1)
+    |> Enum.flat_map(&Tokenizer.terms_for/1)
+    |> Enum.uniq()
+  end
+
+  defp term_frequency(term, row) do
+    haystack = String.downcase("#{row.message} #{row.raw} #{row.service}")
+    term = String.downcase(term)
+
+    length(Regex.scan(~r/#{Regex.escape(term)}/, haystack))
+    |> max(1)
+  end
+
+  defp upsert_rollup_buckets(conn, normalized_rows) do
+    normalized_rows
+    |> Enum.reduce(%{}, fn row, acc ->
+      key =
+        {minute_bucket(row.ts), row.tenant, row.service || "unknown",
+         status_family(row.status_code)}
+
+      Map.update(acc, key, 1, &(&1 + 1))
+    end)
+    |> Enum.each(fn {{bucket, tenant, service, family}, count} ->
+      DuckDB.execute(conn, @upsert_rollup_sql, [bucket, tenant, service, family, count])
+    end)
+  end
+
+  defp log_insert_params(row, ingested_at) do
+    [
+      row.id,
+      row.ts,
+      ingested_at,
+      row.tenant,
+      row.source,
+      row.host,
+      row.service,
+      row.level,
+      row.status_code,
+      row.method,
+      row.path,
+      row.latency_ms,
+      row.message,
+      row.raw,
+      row.attrs_json,
+      row.parse_ok,
+      row.parse_error,
+      row.detected_format,
+      row.schema_version,
+      row.inference_confidence,
+      row.inferred_fields_json
+    ]
+  end
+
+  defp minute_bucket(ts) when is_binary(ts) do
+    case DateTime.from_iso8601(ts) do
+      {:ok, dt, _} ->
+        dt |> DateTime.truncate(:second) |> Map.put(:second, 0) |> DateTime.to_iso8601()
+
+      _ ->
+        DateTime.utc_now() |> DateTime.truncate(:second) |> DateTime.to_iso8601()
+    end
+  end
+
+  defp minute_bucket(_),
+    do: DateTime.utc_now() |> DateTime.truncate(:second) |> DateTime.to_iso8601()
+
+  defp status_family(code) when is_integer(code) and code >= 500, do: "5xx"
+  defp status_family(code) when is_integer(code) and code >= 400, do: "4xx"
+  defp status_family(_), do: "ok"
 
   defp publish_stats(rows, errors) do
     Phoenix.PubSub.broadcast(
@@ -160,7 +285,10 @@ defmodule AuraLog.Storage.DuckDBWriter do
   defp schedule_flush(ms), do: Process.send_after(self(), :flush, ms)
 
   defp runtime_database_path(config) do
-    System.get_env("AURALOG_DUCKDB_PATH") || config[:database_path] || "/data/auralog.duckdb"
+    case System.get_env("AURALOG_DUCKDB_PATH") do
+      nil -> config[:database_path] || "/data/auralog.duckdb"
+      path -> path
+    end
   end
 
   defp ensure_parent_dir!(db_path) do

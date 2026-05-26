@@ -17,7 +17,7 @@
 - `AuraLog.Parser.NIF`: Rustler entry module for parsing/tokenization NIFs.
 - `AuraLog.Parser.Service`: format detection + fallback parse orchestration.
 - `AuraLog.Storage.DuckDBWriter`: buffered write service and dashboard stat events.
-- `AuraLog.Search.TokenIndex`: token search index (MVP in-memory fallback).
+- `AuraLog.Search.Tokenizer`: term extraction for `log_terms` indexing and search.
 - `AuraLog.Query.Service`: reusable analytics/search query facade.
 - `AuraLogWeb.DashboardLive`: zero-JS real-time dashboard.
 

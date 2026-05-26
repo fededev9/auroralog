@@ -20,6 +20,18 @@ if config_env() == :prod do
 
   config :aura_log, :start_udp_listener, udp_ingest?
 
+  if udp_ingest? do
+    udp_token =
+      System.get_env("AURALOG_UDP_INGEST_TOKEN") ||
+        raise """
+        AURALOG_UDP_INGEST_TOKEN is required when AURALOG_UDP_INGEST_ENABLED=true.
+        UDP payloads must be JSON: {"token":"...","tenant":"...","raw":"..."}
+        """
+
+    config :aura_log, :udp_ingest_token, udp_token
+    config :aura_log, :udp_ingest_token_required, true
+  end
+
   config :aura_log_web, AuraLogWeb.Endpoint,
     server: true,
     secret_key_base:
