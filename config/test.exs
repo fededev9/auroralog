@@ -8,8 +8,14 @@ config :aura_log,
   ingest_jwt_secret: "test-jwt-secret-for-ci",
   start_udp_listener: false
 
+_test_db =
+  Path.join(System.tmp_dir!(), "auralog_test_#{System.system_time(:second)}.duckdb")
+
+config :duckdb_ex,
+  duckdb_path: Path.expand("priv/duckdb/duckdb", File.cwd!())
+
 config :aura_log, AuraLog.Storage.DuckDBWriter,
-  database_path: :memory,
+  database_path: _test_db,
   flush_interval_ms: 50
 
 config :phoenix_live_view, :colocated_js, disable_symlink_warning: true
