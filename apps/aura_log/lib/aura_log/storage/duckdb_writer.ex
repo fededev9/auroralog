@@ -163,15 +163,21 @@ defmodule AuraLog.Storage.DuckDBWriter do
     end
   rescue
     error ->
-      Logger.error("Batch persist exception: #{inspect(error)}")
+      Logger.error("Batch persist exception: #{Exception.format(:error, error, __STACKTRACE__)}")
       {:error, error}
   end
 
   defp insert_logs_and_terms(conn, normalized_rows) do
     Enum.reduce_while(normalized_rows, :ok, fn row, :ok ->
       case insert_log_row(conn, row) do
-        :ok -> insert_term_rows(conn, row)
-        {:error, reason} -> {:halt, {:error, reason}}
+        :ok ->
+          case insert_term_rows(conn, row) do
+            :ok -> {:cont, :ok}
+            {:error, reason} -> {:halt, {:error, reason}}
+          end
+
+        {:error, reason} ->
+          {:halt, {:error, reason}}
       end
     end)
   end
@@ -186,9 +192,9 @@ defmodule AuraLog.Storage.DuckDBWriter do
   end
 
   defp insert_term_rows(conn, row) do
-    terms = terms_for_row(row)
-
-    Enum.reduce_while(terms, :ok, fn term, :ok ->
+    row
+    |> terms_for_row()
+    |> Enum.reduce_while(:ok, fn term, :ok ->
       freq = term_frequency(term, row)
       params = [row.id, term, freq, row.ts]
 
@@ -200,19 +206,27 @@ defmodule AuraLog.Storage.DuckDBWriter do
   end
 
   defp terms_for_row(row) do
-    [row.message, row.raw, row.service]
-    |> Enum.filter(&is_binary/1)
-    |> Enum.flat_map(&Tokenizer.terms_for/1)
-    |> Enum.uniq()
+    texts =
+      [row.message, row.raw, row.service]
+      |> Enum.filter(&is_binary/1)
+
+    for text <- texts, term <- Tokenizer.terms_for(text), is_binary(term), uniq: true, do: term
   end
 
-  defp term_frequency(term, row) do
-    haystack = String.downcase("#{row.message} #{row.raw} #{row.service}")
+  defp term_frequency(term, row) when is_binary(term) do
+    haystack =
+      [row.message, row.raw, row.service]
+      |> Enum.filter(&is_binary/1)
+      |> Enum.join(" ")
+      |> String.downcase()
+
     term = String.downcase(term)
 
     length(Regex.scan(~r/#{Regex.escape(term)}/, haystack))
     |> max(1)
   end
+
+  defp term_frequency(_term, _row), do: 1
 
   defp upsert_rollup_buckets(conn, normalized_rows) do
     normalized_rows
@@ -378,8 +392,34 @@ defmodule AuraLog.Storage.DuckDBWriter do
   end
 
   defp encode_json(value) when is_binary(value), do: value
-  defp encode_json(value) when is_map(value) or is_list(value), do: Jason.encode!(value)
+
+  defp encode_json(value) when is_map(value) do
+    case Jason.encode(value) do
+      {:ok, json} -> json
+      {:error, _} -> "{}"
+    end
+  end
+
+  defp encode_json(value) when is_list(value) do
+    if :erlang.is_list(value) and not improper_list?(value) do
+      case Jason.encode(value) do
+        {:ok, json} -> json
+        {:error, _} -> "[]"
+      end
+    else
+      "{}"
+    end
+  end
+
   defp encode_json(value), do: Jason.encode!(%{"value" => to_string(value)})
+
+  defp improper_list?(list) do
+    case list do
+      [_ | tail] when is_list(tail) -> improper_list?(tail)
+      [_ | _] -> true
+      _ -> false
+    end
+  end
 
   defp unique_id do
     "log_" <> Integer.to_string(System.unique_integer([:positive]))
