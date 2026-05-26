@@ -313,8 +313,7 @@ defmodule AuraLog.Storage.DuckDBWriter do
       path: string_field(row, :path, "path"),
       latency_ms: parse_float(Map.get(row, :latency_ms) || Map.get(row, "latency_ms")),
       message: string_field(row, :message, "message"),
-      raw:
-        string_field(row, :raw, "raw") || string_field(row, :raw_line, "raw_line") || "",
+      raw: string_field(row, :raw, "raw") || string_field(row, :raw_line, "raw_line") || "",
       attrs_json: encode_json(attrs_map),
       parse_ok: parse_ok?(row),
       parse_error: string_field(row, :parse_error, "parse_error"),
