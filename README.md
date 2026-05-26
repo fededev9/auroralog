@@ -50,6 +50,8 @@ UDP ingest is **disabled by default** in production. The prod compose file does 
 
 ```bash
 mix deps.get
+chmod +x infra/scripts/install_duckdb_cli.sh
+./infra/scripts/install_duckdb_cli.sh priv/duckdb
 cd apps/aura_log_web && mix assets.setup && mix assets.build && cd ../..
 mix compile
 mix phx.server

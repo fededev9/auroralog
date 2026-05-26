@@ -18,11 +18,9 @@ jobs:
       - name: Fetch deps
         run: mix deps.get
       - name: Install DuckDB CLI
-        env:
-          AURALOG_DUCKDB_PATH: ${{ runner.temp }}/auralog.duckdb
         run: |
-          mix duckdb_ex.install
-          chmod +x priv/duckdb/duckdb
+          chmod +x infra/scripts/install_duckdb_cli.sh
+          ./infra/scripts/install_duckdb_cli.sh priv/duckdb
       - name: Check format
         run: mix format --check-formatted
       - name: Build assets
@@ -33,6 +31,8 @@ jobs:
       - name: Compile
         run: mix compile
       - name: Test
+        env:
+          DUCKDB_PATH: ${{ github.workspace }}/priv/duckdb/duckdb
         run: mix test
       - name: Build production image
         run: docker compose -f infra/docker/docker-compose.prod.yml build auralog
